@@ -2,7 +2,7 @@
 
 A small **multi-target tracking** sandbox that combines a high-performance **Rust** tracking core with a **Python** experiment layer. It simulates multiple moving targets with noisy detections (and optional clutter), then tracks them using **Kalman filtering + data association**. The goal is to demonstrate production-style engineering patterns: a fast, testable systems core with a clean Python-facing API for rapid iteration and visualization.
 
-![demo](assets/demo copy.png)
+
 ![demo](assets/demo.png)
 ---
 
