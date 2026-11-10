@@ -60,13 +60,27 @@ fn load(name: &str) -> Fixture {
 }
 
 fn run(fx: &Fixture) -> (Metrics, Golden) {
-    let cfg = TrackerConfig { dt: fx.dt, max_missed: 6, ..TrackerConfig::default() };
+    let cfg = TrackerConfig {
+        dt: fx.dt,
+        max_missed: 6,
+        ..TrackerConfig::default()
+    };
     let mut trk = MultiTracker::new(cfg);
     let nt = fx.truth.len();
-    let (mut se_p, mut se_v, mut cnt, mut covered) = (vec![0.0; nt], vec![0.0; nt], vec![0usize; nt], vec![0usize; nt]);
+    let (mut se_p, mut se_v, mut cnt, mut covered) = (
+        vec![0.0; nt],
+        vec![0.0; nt],
+        vec![0usize; nt],
+        vec![0usize; nt],
+    );
     let mut last_id: Vec<Option<u64>> = vec![None; nt];
     let mut switches = vec![0usize; nt];
-    let mut g = Golden { tracks_per_step: vec![], next_ids_seen: 0, final_tracks: vec![], checksum: 0.0 };
+    let mut g = Golden {
+        tracks_per_step: vec![],
+        next_ids_seen: 0,
+        final_tracks: vec![],
+        checksum: 0.0,
+    };
     let mut max_tracks = 0;
 
     for (k, m) in fx.measurements.iter().enumerate() {
@@ -86,7 +100,12 @@ fn run(fx: &Fixture) -> (Metrics, Golden) {
             let best = tracks
                 .iter()
                 .filter(|t| t.hits >= 3)
-                .map(|t| (t, ((t.kf.x[0] - s[0]).powi(2) + (t.kf.x[1] - s[1]).powi(2)).sqrt()))
+                .map(|t| {
+                    (
+                        t,
+                        ((t.kf.x[0] - s[0]).powi(2) + (t.kf.x[1] - s[1]).powi(2)).sqrt(),
+                    )
+                })
                 .min_by(|a, b| a.1.total_cmp(&b.1));
             if let Some((t, d)) = best.filter(|b| b.1 <= MATCH_RADIUS) {
                 covered[ti] += 1;
@@ -103,8 +122,12 @@ fn run(fx: &Fixture) -> (Metrics, Golden) {
     g.final_tracks = trk.tracks().iter().map(|t| (t.id, t.kf.state())).collect();
     let scored = (fx.measurements.len() - WARMUP) as f64;
     let m = Metrics {
-        pos_rmse: (0..nt).map(|i| (se_p[i] / cnt[i].max(1) as f64).sqrt()).collect(),
-        vel_rmse: (0..nt).map(|i| (se_v[i] / cnt[i].max(1) as f64).sqrt()).collect(),
+        pos_rmse: (0..nt)
+            .map(|i| (se_p[i] / cnt[i].max(1) as f64).sqrt())
+            .collect(),
+        vel_rmse: (0..nt)
+            .map(|i| (se_v[i] / cnt[i].max(1) as f64).sqrt())
+            .collect(),
         coverage: covered.iter().map(|&c| c as f64 / scored).collect(),
         id_switches: switches,
         max_tracks,
@@ -121,17 +144,31 @@ fn check_golden(name: &str, g: &Golden) {
         return;
     }
     let want: Golden = serde_json::from_str(&fs::read_to_string(&p).unwrap()).unwrap();
-    assert_eq!(g.tracks_per_step, want.tracks_per_step, "{name}: track count trajectory changed");
-    assert_eq!(g.next_ids_seen, want.next_ids_seen, "{name}: track ids changed");
+    assert_eq!(
+        g.tracks_per_step, want.tracks_per_step,
+        "{name}: track count trajectory changed"
+    );
+    assert_eq!(
+        g.next_ids_seen, want.next_ids_seen,
+        "{name}: track ids changed"
+    );
     assert_eq!(g.final_tracks.len(), want.final_tracks.len());
     for ((id, s), (wid, ws)) in g.final_tracks.iter().zip(&want.final_tracks) {
         assert_eq!(id, wid);
         for (a, b) in s.iter().zip(ws) {
-            assert!((a - b).abs() <= GOLDEN_ABS_TOL, "{name}: track {id} state {a} vs {b}");
+            assert!(
+                (a - b).abs() <= GOLDEN_ABS_TOL,
+                "{name}: track {id} state {a} vs {b}"
+            );
         }
     }
     let tol = GOLDEN_ABS_TOL * g.tracks_per_step.iter().sum::<usize>() as f64 * 4.0;
-    assert!((g.checksum - want.checksum).abs() <= tol.max(1e-6), "{name}: checksum {} vs {}", g.checksum, want.checksum);
+    assert!(
+        (g.checksum - want.checksum).abs() <= tol.max(1e-6),
+        "{name}: checksum {} vs {}",
+        g.checksum,
+        want.checksum
+    );
 }
 
 struct Envelope {
@@ -148,12 +185,32 @@ fn scenario(name: &str, env: Envelope) {
     let (m, g) = run(&fx);
     eprintln!("{name}: {m:?}");
     for i in 0..fx.truth.len() {
-        assert!(m.pos_rmse[i] <= env.max_pos_rmse, "{name} target {i}: pos RMSE {:.3}", m.pos_rmse[i]);
-        assert!(m.vel_rmse[i] <= env.max_vel_rmse, "{name} target {i}: vel RMSE {:.3}", m.vel_rmse[i]);
-        assert!(m.coverage[i] >= env.min_coverage, "{name} target {i}: coverage {:.3}", m.coverage[i]);
-        assert!(m.id_switches[i] <= env.max_id_switches, "{name} target {i}: {} id switches", m.id_switches[i]);
+        assert!(
+            m.pos_rmse[i] <= env.max_pos_rmse,
+            "{name} target {i}: pos RMSE {:.3}",
+            m.pos_rmse[i]
+        );
+        assert!(
+            m.vel_rmse[i] <= env.max_vel_rmse,
+            "{name} target {i}: vel RMSE {:.3}",
+            m.vel_rmse[i]
+        );
+        assert!(
+            m.coverage[i] >= env.min_coverage,
+            "{name} target {i}: coverage {:.3}",
+            m.coverage[i]
+        );
+        assert!(
+            m.id_switches[i] <= env.max_id_switches,
+            "{name} target {i}: {} id switches",
+            m.id_switches[i]
+        );
     }
-    assert!(m.max_tracks <= env.max_tracks, "{name}: {} simultaneous tracks", m.max_tracks);
+    assert!(
+        m.max_tracks <= env.max_tracks,
+        "{name}: {} simultaneous tracks",
+        m.max_tracks
+    );
     check_golden(name, &g);
 }
 
@@ -161,17 +218,44 @@ fn scenario(name: &str, env: Envelope) {
 
 #[test]
 fn two_targets_clean() {
-    scenario("two_targets_clean", Envelope { max_pos_rmse: 1.2, max_vel_rmse: 1.5, min_coverage: 1.0, max_id_switches: 0, max_tracks: 3 });
+    scenario(
+        "two_targets_clean",
+        Envelope {
+            max_pos_rmse: 1.2,
+            max_vel_rmse: 1.5,
+            min_coverage: 1.0,
+            max_id_switches: 0,
+            max_tracks: 3,
+        },
+    );
 }
 
 #[test]
 fn two_targets_clutter() {
-    scenario("two_targets_clutter", Envelope { max_pos_rmse: 1.2, max_vel_rmse: 1.0, min_coverage: 0.99, max_id_switches: 0, max_tracks: 40 });
+    scenario(
+        "two_targets_clutter",
+        Envelope {
+            max_pos_rmse: 1.2,
+            max_vel_rmse: 1.0,
+            min_coverage: 0.99,
+            max_id_switches: 0,
+            max_tracks: 40,
+        },
+    );
 }
 
 #[test]
 fn three_targets_crossing() {
-    scenario("three_targets_crossing", Envelope { max_pos_rmse: 1.5, max_vel_rmse: 2.5, min_coverage: 0.98, max_id_switches: 2, max_tracks: 12 });
+    scenario(
+        "three_targets_crossing",
+        Envelope {
+            max_pos_rmse: 1.5,
+            max_vel_rmse: 2.5,
+            min_coverage: 0.98,
+            max_id_switches: 2,
+            max_tracks: 12,
+        },
+    );
 }
 
 #[test]

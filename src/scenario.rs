@@ -57,7 +57,10 @@ pub fn generate(
             .map(|t| (t[0] + rng.normal() * pos_std, t[1] + rng.normal() * pos_std))
             .collect();
         for _ in 0..clutter {
-            m.push(((rng.uniform() * 2.0 - 1.0) * area, (rng.uniform() * 2.0 - 1.0) * area));
+            m.push((
+                (rng.uniform() * 2.0 - 1.0) * area,
+                (rng.uniform() * 2.0 - 1.0) * area,
+            ));
         }
         for i in (1..m.len()).rev() {
             let j = (rng.next_u64() % (i as u64 + 1)) as usize;

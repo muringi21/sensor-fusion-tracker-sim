@@ -218,7 +218,10 @@ mod tests {
             f.update_pos(vx * t, vy * t).unwrap();
         }
         let s = f.state();
-        assert!((s[2] - vx).abs() < 1e-3 && (s[3] - vy).abs() < 1e-3, "{s:?}");
+        assert!(
+            (s[2] - vx).abs() < 1e-3 && (s[3] - vy).abs() < 1e-3,
+            "{s:?}"
+        );
     }
 
     #[test]

@@ -2,27 +2,29 @@ name: ci
 on: [push, pull_request]
 
 jobs:
-  test:
+  rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      # Compile benches (don't run them on shared CI runners: too noisy).
+      - run: cargo bench --no-run
 
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - uses: dtolnay/rust-toolchain@stable
-
-      - name: Install deps
-        run: python -m pip install -U pip maturin pytest numpy matplotlib
-
-      - name: Build wheel
-        run: |
-          mkdir -p dist
-          maturin build --release --out dist
-
-      - name: Install wheel
-        run: python -m pip install dist/*.whl
-
-      - name: Run tests
-        run: pytest -q
+      - run: python -m pip install -U pip maturin pytest numpy matplotlib
+      - run: maturin build --release --out dist
+      - run: python -m pip install dist/*.whl
+      - run: pytest -q

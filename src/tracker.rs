@@ -19,7 +19,13 @@ pub struct TrackerConfig {
 
 impl Default for TrackerConfig {
     fn default() -> Self {
-        Self { dt: 0.1, q: 1.0, r_pos: 4.0, gate_d2: 9.21, max_missed: 5 }
+        Self {
+            dt: 0.1,
+            q: 1.0,
+            r_pos: 4.0,
+            gate_d2: 9.21,
+            max_missed: 5,
+        }
     }
 }
 
@@ -84,18 +90,28 @@ impl MultiTracker {
         let gate = self.cfg.gate_d2;
         self.order.clear();
         self.order.extend(0..measurements.len());
-        self.order.sort_unstable_by(|&i, &j| measurements[i].0.total_cmp(&measurements[j].0).then(i.cmp(&j)));
+        self.order.sort_unstable_by(|&i, &j| {
+            measurements[i]
+                .0
+                .total_cmp(&measurements[j].0)
+                .then(i.cmp(&j))
+        });
         self.sorted_x.clear();
-        self.sorted_x.extend(self.order.iter().map(|&i| measurements[i].0));
+        self.sorted_x
+            .extend(self.order.iter().map(|&i| measurements[i].0));
 
         for (ti, trk) in self.tracks.iter().enumerate() {
             let (z_pred, s) = trk.kf.innovation();
             let det = s[(0, 0)] * s[(1, 1)] - s[(0, 1)] * s[(1, 0)];
-            if !(det > 0.0) || !det.is_finite() {
+            if !(det.is_finite() && det > 0.0) {
                 continue; // singular / non-PD innovation: track cannot gate
             }
             let inv_det = 1.0 / det;
-            let (a, b, c) = (s[(1, 1)] * inv_det, -s[(0, 1)] * inv_det, s[(0, 0)] * inv_det);
+            let (a, b, c) = (
+                s[(1, 1)] * inv_det,
+                -s[(0, 1)] * inv_det,
+                s[(0, 0)] * inv_det,
+            );
             let ln_det = det.ln();
             let (px, py) = (z_pred[0], z_pred[1]);
             // Exact bounding box of the gate ellipse (tiny epsilon for rounding).
@@ -124,7 +140,8 @@ impl MultiTracker {
 
         // Greedy nearest-neighbour: lowest d2 first. Ties broken by indices so
         // the result is fully deterministic.
-        self.pairs.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        self.pairs
+            .sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
         self.track_used.clear();
         self.track_used.resize(self.tracks.len(), false);
         self.meas_used.clear();
@@ -153,7 +170,12 @@ impl MultiTracker {
         for (mi, &(mx, my)) in measurements.iter().enumerate() {
             if !self.meas_used[mi] {
                 let kf = KalmanFilterCV::new(c.dt, c.q, c.r_pos, Vector4::new(mx, my, 0.0, 0.0));
-                self.tracks.push(Track { id: self.next_id, kf, missed: 0, hits: 1 });
+                self.tracks.push(Track {
+                    id: self.next_id,
+                    kf,
+                    missed: 0,
+                    hits: 1,
+                });
                 self.next_id += 1;
             }
         }
@@ -184,7 +206,11 @@ mod tests {
         for k in 0..50 {
             let x = k as f64 * 0.5;
             // Present measurements in alternating order: association must not care.
-            let m = if k % 2 == 0 { [(x, 0.0), (x, 100.0)] } else { [(x, 100.0), (x, 0.0)] };
+            let m = if k % 2 == 0 {
+                [(x, 0.0), (x, 100.0)]
+            } else {
+                [(x, 100.0), (x, 0.0)]
+            };
             t.step(&m).unwrap();
         }
         let ids: Vec<u64> = t.tracks().iter().map(|t| t.id).collect();
