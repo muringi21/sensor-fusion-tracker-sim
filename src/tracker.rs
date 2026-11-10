@@ -1,8 +1,8 @@
 //! Multi-target tracker: predict → gate → greedy NN associate → update →
 //! spawn → prune.
 
-use crate::kalman::{mahalanobis2, KalmanError, KalmanFilterCV};
-use nalgebra::{Vector2, Vector4};
+use crate::kalman::{KalmanError, KalmanFilterCV};
+use nalgebra::Vector4;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TrackerConfig {
@@ -41,6 +41,8 @@ pub struct MultiTracker {
     pairs: Vec<(f64, usize, usize)>,
     track_used: Vec<bool>,
     meas_used: Vec<bool>,
+    order: Vec<usize>,
+    sorted_x: Vec<f64>,
 }
 
 impl MultiTracker {
@@ -52,6 +54,8 @@ impl MultiTracker {
             pairs: Vec::new(),
             track_used: Vec::new(),
             meas_used: Vec::new(),
+            order: Vec::new(),
+            sorted_x: Vec::new(),
         }
     }
 
@@ -65,19 +69,55 @@ impl MultiTracker {
             trk.kf.predict();
         }
 
-        // Gating: candidate (d2, track, measurement) pairs.
+        // Gating: candidate (cost, track, measurement) pairs.
+        //
+        // Performance (see README "Performance"): the original loop tested
+        // every track against every measurement, O(T*M). Profiling showed ~80%
+        // of runtime there. Instead we sort measurements by x once per step and,
+        // for each track, binary-search the x-window that can possibly pass the
+        // gate. The window is exact, not a heuristic: for an ellipse
+        // y^T S^-1 y <= g the extreme x-offset is sqrt(g * S_xx) (likewise y),
+        // so no gated pair is ever skipped. Pairs are then fully sorted with
+        // index tie-breakers, so the output is identical to the brute-force
+        // version (enforced by the golden regression tests).
         self.pairs.clear();
+        let gate = self.cfg.gate_d2;
+        self.order.clear();
+        self.order.extend(0..measurements.len());
+        self.order.sort_unstable_by(|&i, &j| measurements[i].0.total_cmp(&measurements[j].0).then(i.cmp(&j)));
+        self.sorted_x.clear();
+        self.sorted_x.extend(self.order.iter().map(|&i| measurements[i].0));
+
         for (ti, trk) in self.tracks.iter().enumerate() {
             let (z_pred, s) = trk.kf.innovation();
-            for (mi, &(mx, my)) in measurements.iter().enumerate() {
-                let y = Vector2::new(mx, my) - z_pred;
-                if let Some(d2) = mahalanobis2(&y, &s) {
-                    if d2 <= self.cfg.gate_d2 {
-                        // Rank by negative log-likelihood (d2 + ln|S|), not raw
-                        // d2: raw d2 favours young, high-covariance tracks, which
-                        // then steal detections from established tracks.
-                        self.pairs.push((d2 + s.determinant().ln(), ti, mi));
-                    }
+            let det = s[(0, 0)] * s[(1, 1)] - s[(0, 1)] * s[(1, 0)];
+            if !(det > 0.0) || !det.is_finite() {
+                continue; // singular / non-PD innovation: track cannot gate
+            }
+            let inv_det = 1.0 / det;
+            let (a, b, c) = (s[(1, 1)] * inv_det, -s[(0, 1)] * inv_det, s[(0, 0)] * inv_det);
+            let ln_det = det.ln();
+            let (px, py) = (z_pred[0], z_pred[1]);
+            // Exact bounding box of the gate ellipse (tiny epsilon for rounding).
+            let rx = (gate * s[(0, 0)]).sqrt() * (1.0 + 1e-9);
+            let ry = (gate * s[(1, 1)]).sqrt() * (1.0 + 1e-9);
+            let lo = self.sorted_x.partition_point(|&x| x < px - rx);
+            for &mi in &self.order[lo..] {
+                let (mx, my) = measurements[mi];
+                let dx = mx - px;
+                if dx > rx {
+                    break;
+                }
+                let dy = my - py;
+                if dy.abs() > ry {
+                    continue;
+                }
+                let d2 = a * dx * dx + 2.0 * b * dx * dy + c * dy * dy;
+                if d2 <= gate {
+                    // Rank by negative log-likelihood (d2 + ln|S|), not raw
+                    // d2: raw d2 favours young, high-covariance tracks, which
+                    // then steal detections from established tracks.
+                    self.pairs.push((d2 + ln_det, ti, mi));
                 }
             }
         }
@@ -202,6 +242,60 @@ mod tests {
         let old = &t.tracks()[0];
         assert_eq!(old.id, 1);
         assert_eq!(old.missed, 0, "established track lost its detection");
+    }
+
+    #[test]
+    fn closed_form_d2_matches_reference_mahalanobis() {
+        use crate::kalman::mahalanobis2;
+        use nalgebra::{Matrix2, Vector2};
+        let s = Matrix2::new(5.0, 1.2, 1.2, 3.0);
+        let inv = s.try_inverse().unwrap();
+        for &(dx, dy) in &[(0.0, 0.0), (1.0, -2.0), (3.5, 0.25), (-4.0, -4.0)] {
+            let (a, b, c) = (inv[(0, 0)], inv[(0, 1)], inv[(1, 1)]);
+            let fast = a * dx * dx + 2.0 * b * dx * dy + c * dy * dy;
+            let reference = mahalanobis2(&Vector2::new(dx, dy), &s).unwrap();
+            assert!((fast - reference).abs() < 1e-12, "{fast} vs {reference}");
+        }
+    }
+
+    /// Reference O(T*M) gating identical to the pre-optimisation code path.
+    fn brute_force_pairs(t: &MultiTracker, meas: &[(f64, f64)]) -> Vec<(f64, usize, usize)> {
+        use crate::kalman::mahalanobis2;
+        use nalgebra::Vector2;
+        let mut out = vec![];
+        for (ti, trk) in t.tracks.iter().enumerate() {
+            let (z, s) = trk.kf.innovation();
+            for (mi, &(mx, my)) in meas.iter().enumerate() {
+                if let Some(d2) = mahalanobis2(&(Vector2::new(mx, my) - z), &s) {
+                    if d2 <= t.cfg.gate_d2 {
+                        out.push((d2 + s.determinant().ln(), ti, mi));
+                    }
+                }
+            }
+        }
+        out.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        out
+    }
+
+    #[test]
+    fn windowed_gating_matches_brute_force() {
+        let scen = crate::scenario::generate(3, 60, 30, 30, 0.1, 2.0, 300.0);
+        let mut t = tracker();
+        for m in &scen {
+            // Predict a clone exactly as step() will, then compare gated pairs.
+            let mut pre = t.clone();
+            for trk in &mut pre.tracks {
+                trk.kf.predict();
+            }
+            let want = brute_force_pairs(&pre, m);
+            t.step(m).unwrap();
+            let got = &t.pairs;
+            assert_eq!(got.len(), want.len());
+            for (g, w) in got.iter().zip(&want) {
+                assert_eq!((g.1, g.2), (w.1, w.2));
+                assert!((g.0 - w.0).abs() < 1e-9);
+            }
+        }
     }
 
     #[test]
