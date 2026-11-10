@@ -1,14 +1,15 @@
 [build-system]
-requires = ["maturin>=1.5"]
+requires = ["maturin>=1.5,<2"]
 build-backend = "maturin"
 
 [project]
 name = "sensor-fusion-tracker-sim"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.10"
-dependencies = ["numpy", "matplotlib"]
+dependencies = ["numpy>=1.17", "matplotlib"]
 
 [tool.maturin]
-module-name = "tracker_core"
+module-name = "tracker_core.tracker_core"
 python-source = "python"
 python-packages = ["tracker"]
+features = ["python"]

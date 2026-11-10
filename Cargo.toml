@@ -1,12 +1,36 @@
 [package]
 name = "tracker_core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "Multi-target tracking core: constant-velocity Kalman filter, Mahalanobis gating, greedy nearest-neighbour association"
+license = "MIT"
 
 [lib]
 name = "tracker_core"
-crate-type = ["cdylib"]
+# rlib for `cargo test` / `cargo bench`; cdylib for the Python extension.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Enabled by maturin (see pyproject.toml). Kept off for `cargo test`/`cargo bench`
+# so the pure-Rust core links without a Python interpreter.
+python = ["dep:pyo3", "pyo3/extension-module"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module"] }
 nalgebra = "0.33"
+pyo3 = { version = "0.22", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support", "plotters"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[bench]]
+name = "tracking_loop"
+harness = false
+
+[profile.bench]
+debug = true   # symbols for flamegraph
+
+[profile.release]
+debug = 1

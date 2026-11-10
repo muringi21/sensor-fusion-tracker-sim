@@ -39,4 +39,6 @@ target/
 Cargo.lock
 
 # Rustfmt / Clippy outputs (usually not needed, but harmless)
-rustfmt.toml
+rustfmt.toml/target
+flamegraph*.svg
+perf.data*

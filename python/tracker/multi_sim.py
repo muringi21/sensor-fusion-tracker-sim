@@ -1,58 +1,62 @@
+"""Seeded multi-target simulation (the "Python experiment layer").
+
+The simulator is pure NumPy so fixtures can be generated without building the
+Rust extension. ``run_multi_demo`` feeds the simulated detections to the Rust
+``tracker_core.MultiTrackerCV``.
+"""
+
 import numpy as np
-import tracker_core
 
-def simulate_multi(seed=0, n=200, dt=0.1, pos_std=2.0, clutter_per_step=0, area=200.0):
+DEFAULT_TARGETS = (
+    (-50.0, -20.0, 12.0, 3.5),
+    (60.0, 30.0, -10.0, -2.0),
+)
+
+
+def simulate_multi(seed=0, n=200, dt=0.1, pos_std=2.0, clutter_per_step=0,
+                   area=200.0, targets=DEFAULT_TARGETS):
+    """Simulate constant-velocity targets with noisy, unlabelled detections.
+
+    Returns ``(truth, measurements)`` where ``truth`` has shape
+    ``(n_targets, n, 4)`` holding ``[x, y, vx, vy]`` and ``measurements[k]`` is a
+    shuffled list of ``(x, y)`` tuples (detections + uniform clutter).
+    Determinism: NumPy's ``default_rng`` (PCG64) gives identical streams for a
+    given seed across platforms and NumPy versions >= 1.17.
+    """
     rng = np.random.default_rng(seed)
-
-    # Two targets
-    x1 = np.array([-50.0, -20.0, 12.0,  3.5])
-    x2 = np.array([ 60.0,  30.0,-10.0, -2.0])
-
-    X1 = np.zeros((n, 4))
-    X2 = np.zeros((n, 4))
-    X1[0] = x1
-    X2[0] = x2
-
+    x0 = np.asarray(targets, dtype=float)
+    truth = np.zeros((len(x0), n, 4))
+    truth[:, 0] = x0
     for i in range(1, n):
-        for X in (X1, X2):
-            X[i, 0] = X[i - 1, 0] + X[i - 1, 2] * dt
-            X[i, 1] = X[i - 1, 1] + X[i - 1, 3] * dt
-            X[i, 2] = X[i - 1, 2]
-            X[i, 3] = X[i - 1, 3]
+        truth[:, i, 0:2] = truth[:, i - 1, 0:2] + truth[:, i - 1, 2:4] * dt
+        truth[:, i, 2:4] = truth[:, i - 1, 2:4]
 
-    # Per step: measurement set (unordered), may include clutter
     measurements = []
     for i in range(n):
         m = []
-
-        # detections (no IDs)
-        for X in (X1, X2):
-            mx = X[i, 0] + rng.normal(0, pos_std)
-            my = X[i, 1] + rng.normal(0, pos_std)
-            m.append((float(mx), float(my)))
-
-        # clutter (optional)
+        for t in range(len(x0)):
+            m.append((float(truth[t, i, 0] + rng.normal(0, pos_std)),
+                      float(truth[t, i, 1] + rng.normal(0, pos_std))))
         for _ in range(clutter_per_step):
             m.append((float(rng.uniform(-area, area)), float(rng.uniform(-area, area))))
-
         rng.shuffle(m)
         measurements.append(m)
+    return truth, measurements
 
-    return X1, X2, measurements
 
 def run_multi_demo(seed=0, n=250, dt=0.1, clutter_per_step=0):
-    X1, X2, measurements = simulate_multi(
-        seed=seed, n=n, dt=dt,
-        clutter_per_step=clutter_per_step
-    )
+    """Run the Rust tracker on a simulated scenario.
 
+    Returns ``(X1, X2, measurements, hist)``; ``hist`` maps track id to a list
+    of estimated ``(x, y)`` positions.
+    """
+    import tracker_core
+
+    truth, measurements = simulate_multi(seed=seed, n=n, dt=dt,
+                                         clutter_per_step=clutter_per_step)
     mt = tracker_core.MultiTrackerCV(dt=dt, q=1.0, r_pos=4.0, gate_d2=9.21, max_missed=6)
-
-    # track_id -> list[(x,y)]
     hist = {}
     for k in range(n):
-        states = mt.step(measurements[k])  # [(id, [x,y,vx,vy]), ...]
-        for tid, s in states:
+        for tid, s in mt.step(measurements[k]):
             hist.setdefault(tid, []).append((s[0], s[1]))
-
-    return X1, X2, measurements, hist
+    return truth[0], truth[1], measurements, hist
