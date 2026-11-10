@@ -183,10 +183,14 @@ differences between CPUs. Any change in behaviour fails this test, including
 one introduced by a performance change. To update the snapshot on purpose, run
 `UPDATE_GOLDEN=1 cargo test --test regression`.
 
-**Determinism.** NumPy's `default_rng` (PCG64) produces the same stream for a
-given seed on every platform. `pytest` regenerates the fixtures and checks they
-are byte-identical to the committed files. Another test runs the
-Python → PyO3 → Rust path and checks it matches the Rust golden output.
+**Determinism.** The committed fixtures are the single source of truth for the
+Rust tests, so `cargo test` gives the same result everywhere. NumPy's
+`default_rng` (PCG64) produces the same random stream for a given seed, but the
+final floats can differ in the last bit between CPU architectures (e.g. Apple
+Silicon vs x86). `pytest` regenerates the fixtures into a temporary directory
+and checks they match the committed files to within \(10^{-9}\) m. It never
+overwrites the committed files. Another test runs the Python → PyO3 → Rust path
+and checks it matches the Rust golden output.
 
 ### Association bug found by the tests
 

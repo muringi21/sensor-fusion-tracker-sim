@@ -32,12 +32,34 @@ def test_simulation_is_seeded():
     assert a == b and a != c
 
 
+FIXTURE_ABS_TOL = 1e-9  # metres; see scripts/gen_fixtures.py
+
+
+def _assert_close(a, b, path="$"):
+    """Exact match for structure/ints/strings, FIXTURE_ABS_TOL for floats."""
+    if isinstance(a, float) or isinstance(b, float):
+        assert abs(a - b) <= FIXTURE_ABS_TOL, f"{path}: {a!r} vs {b!r}"
+    elif isinstance(a, list):
+        assert isinstance(b, list) and len(a) == len(b), f"{path}: length differs"
+        for i, (x, y) in enumerate(zip(a, b)):
+            _assert_close(x, y, f"{path}[{i}]")
+    elif isinstance(a, dict):
+        assert a.keys() == b.keys(), f"{path}: keys differ"
+        for k in a:
+            _assert_close(a[k], b[k], f"{path}.{k}")
+    else:
+        assert a == b, f"{path}: {a!r} vs {b!r}"
+
+
 def test_fixtures_are_reproducible(tmp_path):
-    """Committed fixtures must equal a fresh regeneration byte-for-byte."""
-    before = {p.name: p.read_bytes() for p in (ROOT / "tests/fixtures").glob("*.json")}
-    subprocess.run([sys.executable, str(ROOT / "scripts/gen_fixtures.py")], check=True)
-    after = {p.name: p.read_bytes() for p in (ROOT / "tests/fixtures").glob("*.json")}
-    assert before == after
+    """Regenerating fixtures (into a temp dir, never over the committed files)
+    reproduces the committed ones to within FIXTURE_ABS_TOL."""
+    subprocess.run([sys.executable, str(ROOT / "scripts/gen_fixtures.py"), "--out", str(tmp_path)],
+                   check=True, capture_output=True)
+    committed = sorted((ROOT / "tests/fixtures").glob("*.json"))
+    assert committed and sorted(p.name for p in tmp_path.glob("*.json")) == [p.name for p in committed]
+    for p in committed:
+        _assert_close(json.loads((tmp_path / p.name).read_text()), json.loads(p.read_text()), p.name)
 
 
 def test_python_path_matches_rust_golden():
